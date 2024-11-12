@@ -53,6 +53,7 @@ func initMongo() {
     usersCollection = client.Database("test").Collection("users")
 }
 
+// Handler functions for signup, login, and protected route
 func signupHandler(w http.ResponseWriter, r *http.Request) {
     var user User
     if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
@@ -142,7 +143,7 @@ func protectedHandler(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode("Welcome to the protected route")
 }
 
-func Handler(w http.ResponseWriter, r *http.Request) {
+func Handler() {
     router := mux.NewRouter()
     router.HandleFunc("/signup", signupHandler).Methods("POST")
     router.HandleFunc("/login", loginHandler).Methods("POST")
@@ -152,5 +153,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
         AllowedOrigins: []string{"*"},
     }).Handler(router)
 
-    corsHandler.ServeHTTP(w, r)
+    log.Println("Starting server on :8080")
+    http.ListenAndServe(":8080", corsHandler)
 }
