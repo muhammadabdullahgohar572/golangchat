@@ -53,7 +53,7 @@ func initMongo() {
     usersCollection = client.Database("test").Collection("users")
 }
 
-// Handler functions for signup, login, and protected route
+// Signup, login, and protected route handler functions
 func signupHandler(w http.ResponseWriter, r *http.Request) {
     var user User
     if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
@@ -143,16 +143,21 @@ func protectedHandler(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode("Welcome to the protected route")
 }
 
-func Handler() {
+// Exported function to handle requests, as required by Vercel
+func Handler(w http.ResponseWriter, r *http.Request) {
+    // Initialize router and define routes
     router := mux.NewRouter()
     router.HandleFunc("/signup", signupHandler).Methods("POST")
     router.HandleFunc("/login", loginHandler).Methods("POST")
     router.HandleFunc("/protected", protectedHandler).Methods("GET")
 
+    // Setup CORS
     corsHandler := cors.New(cors.Options{
         AllowedOrigins: []string{"*"},
+        AllowedMethods: []string{"GET", "POST"},
+        AllowedHeaders: []string{"Authorization", "Content-Type"},
     }).Handler(router)
 
-    log.Println("Starting server on :8080")
-    http.ListenAndServe(":8080", corsHandler)
+    // Serve the request through CORS handler
+    corsHandler.ServeHTTP(w, r)
 }
