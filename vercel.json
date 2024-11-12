@@ -6,9 +6,11 @@
         "use": "@vercel/go"
       }
     ],
-    "env": {
-      "JWT_SECRET": "abdullah55",
-      "MONGO_URI": "mongodb+srv://Abdullah1:Abdullah1@cluster0.agxpb.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-    }
+    "routes": [
+      {
+        "src": "/(.*)",
+        "dest": "/main.go"
+      }
+    ]
   }
   
