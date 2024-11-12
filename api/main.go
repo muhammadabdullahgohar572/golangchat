@@ -1,16 +1,18 @@
 package handler
 
 import (
+    "context"
     "encoding/json"
+    "log"
     "net/http"
     "time"
 
     "github.com/dgrijalva/jwt-go"
     "github.com/gorilla/mux"
+    "github.com/rs/cors"
     "golang.org/x/crypto/bcrypt"
     "go.mongodb.org/mongo-driver/mongo"
     "go.mongodb.org/mongo-driver/mongo/options"
-    "github.com/rs/cors"
 )
 
 var jwtSecret = []byte("abdullah55")
@@ -38,21 +40,28 @@ type Claims struct {
 var client *mongo.Client
 var usersCollection *mongo.Collection
 
+func init() {
+    initMongo()
+}
+
 func initMongo() {
     var err error
-    client, err = mongo.Connect(nil, options.Client().ApplyURI(mongoURI))
+    client, err = mongo.Connect(context.TODO(), options.Client().ApplyURI(mongoURI))
     if err != nil {
-        panic(err)
+        log.Fatal("Error connecting to MongoDB:", err)
     }
     usersCollection = client.Database("test").Collection("users")
 }
 
 func signupHandler(w http.ResponseWriter, r *http.Request) {
     var user User
-    _ = json.NewDecoder(r.Body).Decode(&user)
+    if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
 
     var existingUser User
-    err := usersCollection.FindOne(nil, map[string]string{"email": user.Email}).Decode(&existingUser)
+    err := usersCollection.FindOne(context.TODO(), map[string]string{"email": user.Email}).Decode(&existingUser)
     if err == nil {
         http.Error(w, "Email already exists", http.StatusConflict)
         return
@@ -65,7 +74,7 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
     }
     user.Password = string(hashedPassword)
 
-    _, err = usersCollection.InsertOne(nil, user)
+    _, err = usersCollection.InsertOne(context.TODO(), user)
     if err != nil {
         http.Error(w, "Error creating user", http.StatusInternalServerError)
         return
@@ -77,10 +86,13 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
     var loginData Login
-    _ = json.NewDecoder(r.Body).Decode(&loginData)
+    if err := json.NewDecoder(r.Body).Decode(&loginData); err != nil {
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
 
     var existingUser User
-    err := usersCollection.FindOne(nil, map[string]string{"email": loginData.Email}).Decode(&existingUser)
+    err := usersCollection.FindOne(context.TODO(), map[string]string{"email": loginData.Email}).Decode(&existingUser)
     if err != nil {
         http.Error(w, "Invalid credentials", http.StatusUnauthorized)
         return
@@ -111,11 +123,16 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func protectedHandler(w http.ResponseWriter, r *http.Request) {
-    tokenString := r.Header.Get("Authorization")
+    authHeader := r.Header.Get("Authorization")
+    if authHeader == "" || len(authHeader) < 7 || authHeader[:7] != "Bearer " {
+        http.Error(w, "Missing or invalid token", http.StatusUnauthorized)
+        return
+    }
+    tokenString := authHeader[7:]
+
     token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
         return jwtSecret, nil
     })
-
     if err != nil || !token.Valid {
         http.Error(w, "Invalid token", http.StatusUnauthorized)
         return
@@ -126,16 +143,14 @@ func protectedHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func Handler(w http.ResponseWriter, r *http.Request) {
-    initMongo()
-
-    corsHandler := cors.New(cors.Options{
-        AllowedOrigins: []string{"*"},
-    }).Handler
-
     router := mux.NewRouter()
     router.HandleFunc("/signup", signupHandler).Methods("POST")
     router.HandleFunc("/login", loginHandler).Methods("POST")
     router.HandleFunc("/protected", protectedHandler).Methods("GET")
 
-    corsHandler(router).ServeHTTP(w, r)
+    corsHandler := cors.New(cors.Options{
+        AllowedOrigins: []string{"*"},
+    }).Handler(router)
+
+    corsHandler.ServeHTTP(w, r)
 }
