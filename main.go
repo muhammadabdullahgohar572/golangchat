@@ -1,17 +1,16 @@
-package main
+package handler
 
 import (
 	"encoding/json"
-	"log"
+	"fmt"
 	"net/http"
 	"time"
+
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
-	"github.com/rs/cors"
 	"golang.org/x/crypto/bcrypt"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"context"
 )
 
 // Global variables for JWT and MongoDB
@@ -46,9 +45,9 @@ var usersCollection *mongo.Collection
 // Function to initialize MongoDB
 func initMongo() {
 	var err error
-	client, err = mongo.Connect(context.TODO(), options.Client().ApplyURI(mongoURI))
+	client, err = mongo.Connect(nil, options.Client().ApplyURI(mongoURI))
 	if err != nil {
-		log.Fatal("Error connecting to MongoDB:", err)
+		fmt.Println("Error connecting to MongoDB:", err)
 	}
 	usersCollection = client.Database("test").Collection("users")
 }
@@ -60,7 +59,7 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if email already exists
 	var existingUser User
-	err := usersCollection.FindOne(context.TODO(), map[string]string{"email": user.Email}).Decode(&existingUser)
+	err := usersCollection.FindOne(nil, map[string]string{"email": user.Email}).Decode(&existingUser)
 	if err == nil {
 		http.Error(w, "Email already exists", http.StatusConflict)
 		return
@@ -73,9 +72,11 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save hashed password instead of plain password
+	user.Password = string(hashedPassword)
+
 	// Insert user into MongoDB
-	user.Password = string(hashedPassword) // store hashed password
-	_, err = usersCollection.InsertOne(context.TODO(), user)
+	_, err = usersCollection.InsertOne(nil, user)
 	if err != nil {
 		http.Error(w, "Error creating user", http.StatusInternalServerError)
 		return
@@ -92,7 +93,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if the user exists by email
 	var existingUser User
-	err := usersCollection.FindOne(context.TODO(), map[string]string{"email": loginData.Email}).Decode(&existingUser)
+	err := usersCollection.FindOne(nil, map[string]string{"email": loginData.Email}).Decode(&existingUser)
 	if err != nil {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
@@ -110,7 +111,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	claims := &Claims{
 		Email: loginData.Email,
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: expirationTime.Unix(),
+			ExpiresAt: expirationTime.Unix(), // Correct way to set expiration time
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -142,22 +143,22 @@ func protectedHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode("Welcome to the protected route")
 }
 
-func main() {
+// Entry point for Vercel serverless function
+func Handler(w http.ResponseWriter, r *http.Request) {
 	// Initialize MongoDB
 	initMongo()
 
 	// Set up CORS
-	corsHandler := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"}, // Allow all origins (you can specify domains if needed)
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE"},
-		AllowedHeaders: []string{"Authorization", "Content-Type"},
-	}).Handler
+	r.Header.Add("Access-Control-Allow-Origin", "*")
+	r.Header.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	r.Header.Add("Access-Control-Allow-Headers", "Authorization, Content-Type")
 
-	r := mux.NewRouter()
-	r.HandleFunc("/signup", signupHandler).Methods("POST")
-	r.HandleFunc("/login", loginHandler).Methods("POST")
-	r.HandleFunc("/protected", protectedHandler).Methods("GET")
+	// Setup routes for the handlers
+	router := mux.NewRouter()
+	router.HandleFunc("/signup", signupHandler).Methods("POST")
+	router.HandleFunc("/login", loginHandler).Methods("POST")
+	router.HandleFunc("/protected", protectedHandler).Methods("GET")
 
-	// Start the server with CORS support
-	log.Fatal(http.ListenAndServe(":8080", corsHandler(r)))
+	// Handle the request
+	router.ServeHTTP(w, r)
 }
